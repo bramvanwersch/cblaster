@@ -278,9 +278,11 @@ class Cluster(Serializer):
 
     Attributes:
         indices (list): indexes of the subjects in the list of subjects
-        of the parent scaffold
+         of the parent scaffold
         subjects (list): Subject objects that are in this cluster. Note:
-        These are not serialised for this cluster
+         These are not serialised for this cluster
+        query_sequence_order (list): list of sequences of the order in the query file,
+         is only provided if the query has a meningfull order (gbk, embl files).
         start (int): The start coordinate of the cluster on the parent scaffold
         end (int): The end coordinate of the cluster on the parent scaffold
     """
@@ -297,14 +299,24 @@ class Cluster(Serializer):
         self.indices = indices if indices else []
         self.subjects = subjects if subjects else []
         self.score = score if score else self.calculate_score(query_sequence_order)
-        self.start = start if start else self.subjects[0].start
-        self.end = end if end else self.subjects[-1].end
+        if len(self.subjects) > 0:
+            self.start = start if start else self.subjects[0].start
+            self.end = end if end else self.subjects[-1].end
+        else:
+            self.start = start if start else None
+            self.end = end if end else None
 
     def __iter__(self):
         return iter(self.subjects)
 
     def __len__(self):
         return len(self.subjects)
+
+    def __eq__(self, other):
+        if not isinstance(other, Cluster):
+            raise NotImplementedError("Expected Cluster object")
+        return (set(self.subjects) == set(other.subjects)
+                and self.score == other.score)
 
     def __calculate_synteny_score(self, query_sequence_order):
         if not query_sequence_order:
@@ -358,7 +370,7 @@ class Cluster(Serializer):
     def from_dict(cls, d, *subjects):
         return cls(
             indices=d["indices"],
-            subjects=subjects,
+            subjects=list(subjects),
             score=d["score"],
             start=d["start"],
             end=d["end"],
@@ -390,16 +402,18 @@ class Subject(Serializer):
         self.end = int(end) if end is not None else None
         self.strand = strand
 
+    def __key(self):
+        # make equals behaviour of higher classes consistent with different instances
+        return tuple(sorted(self.hits, key=lambda x: x.bitscore)), self.ipg, self.start, self.end, self.strand
+
     def __eq__(self, other):
         if not isinstance(other, Subject):
             raise NotImplementedError("Expected Subject object")
-        return (
-            set(self.hits) == set(other.hits)
-            and self.ipg == other.ipg
-            and self.start == other.start
-            and self.end == other.end
-            and self.strand == other.strand
-        )
+        return self.__key() == other.__key()
+
+    def __hash__(self):
+        # make sure that subjects can still be hashed
+        return hash(self.__key())
 
     def to_dict(self):
         return {
@@ -470,7 +484,7 @@ class Hit(Serializer):
         )
 
     def __key(self):
-        return (self.query, self.bitscore, self.identity, self.coverage, self.evalue)
+        return self.query, self.bitscore, self.identity, self.coverage, self.evalue
 
     def __hash__(self):
         return hash(self.__key())
