@@ -5,6 +5,9 @@ Test suite for classes.
 """
 
 import pytest
+import os
+from abc import ABC
+from tempfile import TemporaryFile
 from cblaster import classes
 
 
@@ -59,7 +62,7 @@ def scaffolds(subjects, clusters):
 
 @pytest.fixture
 def scaffold_summaries():
-    with open("data/scaffold_summaries") as f:
+    with open(f"data{os.sep}scaffold_summaries.txt") as f:
         summary_text = f.read()
     return [s for s in summary_text.split("\n>>\n") if len(s) > 0]
 
@@ -67,17 +70,40 @@ def scaffold_summaries():
 @pytest.fixture
 def organisms(scaffolds):
     organisms = [
-        classes.Organism("organism1", "strain_organism1", {scaffold.accession: scaffold for scaffold in scaffolds[0:1]})
+        classes.Organism("organism1", "strain_organism1", {scaffold.accession: scaffold for scaffold in scaffolds[0:1]}),
+        classes.Organism(None, None, {scaffold.accession: scaffold for scaffold in scaffolds[0:1]}),
+        classes.Organism("organism2", None, {scaffold.accession: scaffold for scaffold in scaffolds[1:2]}),
     ]
     return organisms
 
 
 @pytest.fixture
 def organism_summaries():
-    with open("data/organism_summaries") as f:
+    with open(f"data{os.sep}organism_summaries.txt") as f:
         summary_text = f.read()
     return [s for s in summary_text.split("\n>>\n") if len(s) > 0]
 
+
+@pytest.fixture
+def sessions(organisms):
+    sessions = [
+        classes.Session(queries=["q1", "q2"], organisms=organisms[0:1],
+                        sequences={"q1": "PRQTEINQNE", "q2": "PRQTEINTWQ"}),
+        classes.Session(queries=["q1", "q2"], organisms=organisms[2:3],
+                        sequences={"q1": "SQMESEQVENCE", "q2": "SQMEOTHERSEQVENCE"},
+                        params={"dummy1": 1})
+    ]
+    return sessions
+
+
+@pytest.fixture
+def session_summaries():
+    with open(f"data{os.sep}session_summaries.txt") as f:
+        summary_text = f.read()
+    return [s for s in summary_text.split("\n>>\n") if len(s) > 0]
+
+
+# TEST HITS
 
 def test_hit_instantiation(hits):
     assert isinstance(hits[0], classes.Serializer)
@@ -226,7 +252,7 @@ def test_subject_values(subjects, index, decimals, result):
     assert subjects[index].values(decimals) == result
 
 
-def test_subject_from_dict(hits, subjects):
+def test_subject_from_dict(hits):
     from_dict_class = classes.Subject.from_dict(
         {
             "hits": [hits[3].to_dict()],
@@ -309,7 +335,7 @@ def test_cluster_to_dict(clusters):
     }
 
 
-def test_cluster_from_dict(subjects, clusters):
+def test_cluster_from_dict(subjects):
     from_dict_class = classes.Cluster.from_dict({
         "indices": [0, 1],
         "score": 2.10006,
@@ -383,11 +409,11 @@ def test_scaffold_to_dict(scaffolds):
     }
 
 
-def test_scaffold_from_dict(subjects, clusters, scaffolds):
+def test_scaffold_from_dict(subjects, clusters):
     from_dict_class = classes.Scaffold.from_dict({
         'accession': 'scaffold2',
-        'clusters': [cluster.to_dict() for cluster in scaffolds[1].clusters],
-        'subjects': [subject.to_dict() for subject in scaffolds[1].subjects]
+        'clusters': [clusters[0].to_dict()],
+        'subjects': [subject.to_dict() for subject in subjects[:2]]
     })
     assert ["scaffold2", [clusters[0]], subjects[:2]] == [
         getattr(from_dict_class, val) for val in [
@@ -448,4 +474,184 @@ def test_organism_summary(organisms, index, hide_headers, delimiter, decimals, r
 
 
 def test_organism_full_name(organisms):
-    pass
+    assert organisms[0].full_name == "organism1 strain_organism1"
+    assert organisms[1].full_name == "No organism"
+    assert organisms[2].full_name == "organism2"
+
+
+def test_organism_to_dict(organisms):
+    assert organisms[0].to_dict() == {
+        "name": "organism1",
+        "strain": "strain_organism1",
+        "scaffolds": [scaffold.to_dict() for scaffold in organisms[0].scaffolds.values()]
+    }
+
+
+def test_organism_from_dict(scaffolds):
+    from_dict_class = classes.Organism.from_dict({
+        "name": "organism1",
+        "strain": "strain_organism1",
+        "scaffolds": [scaffold.to_dict() for scaffold in scaffolds[0:1]]
+    })
+    assert ["organism1", "strain_organism1"] == [
+        getattr(from_dict_class, val) for val in [
+            "name",
+            "strain",
+        ]
+    ]
+    # make sure that the scaffolds are the same without writing an __eq__ method that would not realy serve a purpose
+    from_dict_scaffold = list(from_dict_class.scaffolds.values())[0]
+    assert from_dict_scaffold.accession == scaffolds[0].accession
+    assert all(from_dict_scaffold.subjects[index] == scaffolds[0].subjects[index] for index in
+               range(len(from_dict_scaffold.subjects)))
+    assert all(from_dict_scaffold.clusters[index] == scaffolds[0].clusters[index] for index in
+               range(len(from_dict_scaffold.clusters)))
+
+
+# TEST SESSIONS
+
+def test_session_instantiation(sessions):
+    assert isinstance(sessions[0], classes.Serializer)
+    assert [list, dict, list, dict] == [
+        type(getattr(sessions[0], val))
+        for val in [
+            "queries",
+            "params",
+            "organisms",
+            "sequences",
+        ]
+    ]
+
+
+def test_session_empty_instantiation():
+    assert [[], {}, [], {}] == [
+        getattr(classes.Session(), val)
+        for val in [
+            "queries",
+            "params",
+            "organisms",
+            "sequences",
+        ]
+    ]
+
+
+def test_session_add(sessions, organisms):
+    combined_session_1_2 = sessions[0] + sessions[1]
+    assert [["q1", "q2"], {}, {"q1": "PRQTEINQNE", "q2": "PRQTEINTWQ"}] == [
+        getattr(combined_session_1_2, val)
+        for val in [
+            "queries",
+            "params",
+            "sequences",
+        ]
+    ]
+    # same organism names can assume same organisms in this case
+    assert all(combined_session_1_2.organisms[index].name == name for index, name in
+               enumerate([o.name for o in [organisms[0], organisms[2]]]))
+
+    combined_session_2_1 = sessions[1] + sessions[0]
+    assert [["q1", "q2"], {"dummy1": 1},
+            {"q1": "SQMESEQVENCE", "q2": "SQMEOTHERSEQVENCE"}] == [
+        getattr(combined_session_2_1, val)
+        for val in [
+            "queries",
+            "params",
+            "sequences",
+        ]
+    ]
+    # same organism names can assume same organisms in this case
+    assert all(combined_session_2_1.organisms[index].name == name for index, name in
+               enumerate([o.name for o in [organisms[2], organisms[0]]]))
+
+
+def test_session_to_dict(sessions):
+    assert sessions[1].to_dict() == {
+        "queries": ["q1", "q2"],
+        "sequences": {"q1": "SQMESEQVENCE", "q2": "SQMEOTHERSEQVENCE"},
+        "params": {"dummy1": 1},
+        "organisms": [organism.to_dict() for organism in sessions[1].organisms]
+    }
+
+
+def test_session_from_file(sessions):
+    from_file_session = classes.Session.from_file(f"data{os.sep}test_session1_file.json")
+    assert [from_file_session.queries, from_file_session.params, from_file_session.sequences] == [
+        getattr(sessions[0], val)
+        for val in [
+            "queries",
+            "params",
+            "sequences",
+        ]
+    ]
+    # same organism names can assume same organisms in this case
+    assert all(organism_name == from_file_session.organisms[index].name
+               for index, organism_name in enumerate([o.name for o in sessions[0].organisms]))
+
+
+def test_session_from_files(sessions):
+    from_files_session = classes.Session.from_files([f"data{os.sep}test_session1_file.json",
+                                                     f"data{os.sep}test_session2_file.json"])
+    combined_session_1_2 = sessions[0] + sessions[1]
+    assert [from_files_session.queries, from_files_session.params, from_files_session.sequences] == [
+        getattr(combined_session_1_2, val)
+        for val in [
+            "queries",
+            "params",
+            "sequences",
+        ]
+    ]
+    # same organism names can assume same organisms in this case
+    assert all(organism_name == from_files_session.organisms[index].name
+               for index, organism_name in enumerate([o.name for o in combined_session_1_2.organisms]))
+
+
+def test_session_from_dict(sessions):
+    from_dict_class = classes.Session.from_dict({
+        "queries": ["q1", "q2"],
+        "sequences": {"q1": "PRQTEINQNE", "q2": "PRQTEINTWQ"},
+        "params": {},
+        "organisms": [organism.to_dict() for organism in sessions[0].organisms]
+    })
+    assert [["q1", "q2"], {"q1": "PRQTEINQNE", "q2": "PRQTEINTWQ"}, {}] == [
+        getattr(from_dict_class, val) for val in [
+            "queries",
+            "sequences",
+            "params"
+        ]
+    ]
+    # make sure that the organisms are the same without writing an __eq__ method that would not realy serve a purpose
+    from_dict_organism = from_dict_class.organisms[0]
+    assert from_dict_organism.name == sessions[0].organisms[0].name
+    for index, scaffold in enumerate(from_dict_organism.scaffolds.values()):
+        session_scaffold = list(sessions[0].organisms[0].scaffolds.values())[index]
+        assert scaffold.accession == session_scaffold.accession
+        assert all(scaffold.subjects[index] == session_scaffold.subjects[index] for index in
+                   range(len(scaffold.subjects)))
+        assert all(scaffold.clusters[index] == session_scaffold.clusters[index] for index in
+                   range(len(scaffold.clusters)))
+
+
+@pytest.mark.parametrize(
+    "index, form, hide_headers, delimiter, decimals, result_index",
+    [
+        (0, "summary", False, None, 4, 0),
+        (0, "summary", True, None, 4, 1),
+        (0, "summary", False, "____", 4, 2),
+        (0, "summary", False, None, 0, 3),
+        (0, "binary", False, None, 4, 4),
+        (0, "binary", True, None, 4, 5),
+        (0, "binary", False, "____", 4, 6),
+        (0, "binary", False, None, 0, 7)
+    ],
+)
+def test_session_format(index, form, hide_headers, delimiter, decimals, result_index, sessions, session_summaries):
+    with TemporaryFile(mode="w+") as f:
+        sessions[index].format(form=form, fp=f, hide_headers=hide_headers, delimiter=delimiter, decimals=decimals)
+        f.seek(0)
+        assert f.read() == session_summaries[result_index]
+
+
+# TEST SERIALIZER
+
+def test_serializer_is_abstract():
+    assert issubclass(classes.Serializer, ABC)

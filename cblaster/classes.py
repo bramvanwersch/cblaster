@@ -6,6 +6,7 @@ This module stores the classes (Organism, Scaffold, Hit) used in cblaster.
 
 import re
 import json
+from abc import ABC, abstractmethod
 
 from cblaster.formatters import (
     binary,
@@ -15,19 +16,21 @@ from cblaster.formatters import (
 )
 
 
-class Serializer:
+class Serializer(ABC):
     """JSON serialisation mixin class.
 
     Classes that inherit from this class should implement `to_dict` and
     `from_dict` methods.
     """
 
+    @abstractmethod
     def to_dict(self):
         """Serialises class to dict."""
         raise NotImplementedError
 
     @classmethod
-    def from_dict(self, d):
+    @abstractmethod
+    def from_dict(cls, d):
         """Loads class from dict."""
         raise NotImplementedError
 
@@ -80,7 +83,7 @@ class Session(Serializer):
         if not isinstance(other, Session):
             raise NotImplementedError("Expected Session object")
         if not self.queries == other.queries:
-            raise ValueError("Query sequences do not match")
+            raise ValueError("Query ids do not match")
         return Session(
             queries=self.queries,
             sequences=self.sequences,

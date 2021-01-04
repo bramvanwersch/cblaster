@@ -87,8 +87,8 @@ def binary(
         [
             organism.full_name,
             accession,
-            str(cluster[0].start),
-            str(cluster[-1].end),
+            str(cluster.start),
+            str(cluster.end),
             *[
                 set_decimals(value)
                 for value in get_cell_values(
